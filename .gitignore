@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.smoke/
+.lf-*/
+__pycache__/
+*.pyc
+*.log
+mode-backups/
+mode.txt
+beam-command.txt
+preset.persona.expected.txt
+*.tgz
+.env
+.env.*

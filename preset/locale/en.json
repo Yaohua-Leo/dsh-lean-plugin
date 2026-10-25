@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Lean Proof Assistant Preset",
+    "description": "Declares the \"Lean Proof Assistant\" agent preset: lean-lsp live proof state and library search, the formalization contract carried in the persona, and the deterministic build plus axiom audit as the only acceptance authority."
+  }
+}

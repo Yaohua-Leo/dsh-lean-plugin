@@ -1,0 +1,48 @@
+# NOTICE
+
+This repository (the files listed below) is distributed under the MIT License in
+`LICENSE`.
+
+It vendors and/or drives the following third-party projects:
+
+## Lean Beam — `https://github.com/leanprover/lean-beam`
+
+Copyright (c) 2026 Lean FRO LLC. Licensed under the Apache License, Version 2.0
+(see `licenses/lean-beam-LICENSE`).
+
+Vendored verbatim at commit `753f32ffb74aeb21e390fdc1267aa1dc1dd83a53`:
+
+- `skills/lean-beam/**`
+
+Used at install time (not vendored): the installer/existing installation of the
+`lean-beam` / `lean-beam-mcp` binaries. This repository does not redistribute
+those binaries.
+
+## leanprover/skills — `https://github.com/leanprover/skills`
+
+Licensed under the Apache License, Version 2.0.
+
+Not vendored. The nine skills it publishes (`lean-proof`, `lean-setup`,
+`mathlib-build`, `mathlib-pr`, `mathlib-review`, `lean-bisect`, `lean-mwe`,
+`lean-pr`, `nightly-testing`) are installed at the user's request by upstream's own
+per-harness installers, or by a clone pinned to commit
+`7d3da0282e7b724b07620e45cf212f2e05e19334`.
+
+## lean-lsp-mcp — `https://github.com/oOo0oOo/lean-lsp-mcp`
+
+Copyright Oliver Dressler. MIT licensed.
+
+Not vendored. Installed and run by the user's package manager as
+`uvx lean-lsp-mcp`; this repository only writes the client configuration that
+launches it, and documents the tool names it disables.
+
+## Lean 4 and Lake — `https://github.com/leanprover/lean4`
+
+Apache License 2.0. Used through the user's own `elan`/`lake` installation; not
+distributed here.
+
+## DeepSeek Harness - https://github.com/deepseek-ai/deepseek-harness
+
+The preset composition and standard plan-mode wording are adapted from DeepSeek
+Harness. Copyright (c) 2026 DeepSeek, MIT licensed. The full license is included
+in `licenses/deepseek-harness-LICENSE`. No DSH binaries are redistributed.

@@ -1,0 +1,3 @@
+name: Lean 形式化
+description: Lean 4 形式化助手：Beam 实时证明状态（缺失时回退 Lean LSP）+ leanprover 技能规程；构建与公理审计为验收门槛。
+order: 2

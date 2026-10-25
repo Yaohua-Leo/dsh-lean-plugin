@@ -1,0 +1,69 @@
+{
+  "name": "@local/dsh-lean-preset",
+  "version": "1.1.0",
+  "type": "module",
+  "main": "./preset/index.js",
+  "description": "DSH Lean Proof Assistant plugin: explicit LSP/Beam modes, isolated skills, fail-closed selfcheck and project acceptance gates.",
+  "exports": {
+    ".": "./preset/index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./preset/locale/*.json",
+    "./icon": "./preset/icon.svg"
+  },
+  "files": [
+    "preset/**",
+    "tools/*.py",
+    "tools/*.ps1",
+    "skills/**",
+    "licenses/**",
+    "gate/**",
+    "install/**",
+    "verify/**",
+    "dsh/**",
+    "docs/**",
+    "harnesses.json",
+    "contract.md",
+    "LICENSE",
+    "NOTICE",
+    "AGENTS.md",
+    "BOOTSTRAP.md",
+    "CLAUDE.md",
+    "GEMINI.md",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./preset/cordis.patch.yml"
+    }
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Yaohua (Leo)"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yaohua-Leo/dsh-lean-plugin.git"
+  },
+  "homepage": "https://github.com/Yaohua-Leo/dsh-lean-plugin#readme",
+  "bugs": {
+    "url": "https://github.com/Yaohua-Leo/dsh-lean-plugin/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "lean4",
+    "formalization",
+    "mcp",
+    "lean-beam"
+  ],
+  "engines": {
+    "node": ">=22.16.0",
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
+  "scripts": {
+    "build:preset": "python tools/build_lean_preset.py . preset",
+    "test": "node verify/validate_repo.mjs && node verify/check_selfcheck.mjs && node verify/check_public_package.mjs",
+    "package:kit": "python tools/package_lean_preset.py"
+  }
+}
