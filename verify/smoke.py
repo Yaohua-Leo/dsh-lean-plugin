@@ -45,9 +45,18 @@ class Checker:
         print("%-4s %s%s" % ("PASS" if ok else "FAIL", name, ("  — " + detail) if detail else ""))
         return bool(ok)
 
+    def skip(self, name: str, detail: str = "") -> None:
+        """A surface that does not apply here is skipped, never silently passed."""
+        self.results.append({"check": name, "ok": True, "skipped": True, "detail": detail})
+        print("%-4s %s%s" % ("SKIP", name, ("  — " + detail) if detail else ""))
+
     @property
     def failed(self) -> int:
         return sum(1 for r in self.results if not r["ok"])
+
+    @property
+    def skipped(self) -> int:
+        return sum(1 for r in self.results if r.get("skipped"))
 
 
 def child_env(home: Path | None = None) -> dict:
@@ -72,6 +81,89 @@ def run_installer(*args: str, cwd: Path | None = None, home: Path | None = None)
         cwd=str(cwd or REPO), capture_output=True, text=True,
         encoding="utf-8", errors="replace", env=child_env(home),
     )
+
+
+def selected_harnesses(installer_output: str) -> list[str] | None:
+    """The installer's own report of what it configured.
+
+    Returns None when the report line is missing, so the caller can fail instead
+    of treating an unparsable run as "no surfaces to check".
+    """
+    match = re.search(r"^harnesses\s*:\s*(.+)$", installer_output, re.MULTILINE)
+    if match is None:
+        return None
+    value = match.group(1).strip()
+    if value in ("", "(none)"):
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def expand_surface(raw: str, project: Path, home: Path, dsh_home: Path,
+                   agents_home: Path, scope: str) -> Path:
+    """Mirror install/install.py's expand() for a harness surface path."""
+    text = str(raw)
+    text = text.replace("<project>", str(project))
+    text = text.replace("<repo>", str(REPO))
+    text = text.replace("<DSH_HOME>", str(dsh_home))
+    text = text.replace("<DSH_AGENTS_HOME or ~/.agents>", str(agents_home))
+    text = text.replace("<DSH_AGENTS_HOME>", str(agents_home))
+    if text.startswith("~/"):
+        text = str(home) + text[1:]
+    text = os.path.expandvars(text)
+    path = Path(text)
+    if not path.is_absolute():
+        path = (project if scope == "project" else home) / path
+    return path
+
+
+def expected_install_files(spec: dict, chosen: list[str], project: Path, home: Path,
+                           dsh_home: Path, agents_home: Path) -> list[Path]:
+    """Files the installer promises for exactly the harnesses it reported.
+
+    Derived from harnesses.json (the single source of truth) instead of a
+    hard-coded union, so a harness that is not detected contributes no
+    requirements. Gate-scaffold files are harness-independent.
+    """
+    expected: set[Path] = {
+        project / "lean-formalization.json",
+        project / "LeanAudit.lean",
+        project / "LeanScan.lean",
+        project / "scripts" / "leancheck.ps1",
+        project / ".lean-formalization" / "manifest.json",
+    }
+    owned_skills = spec.get("skills", {}).get("owned", [])
+    for hid in chosen:
+        harness = spec.get("harnesses", {}).get(hid)
+        if harness is None:
+            continue
+        for target in harness.get("instructions", []):
+            if target.get("method") in ("dsh-preset", "dsh-bundle"):
+                continue
+            if target.get("scope") not in ("project", "user") or not target.get("path"):
+                continue
+            expected.add(expand_surface(target["path"], project, home, dsh_home,
+                                        agents_home, target["scope"]))
+        for root in harness.get("skillRoots", []):
+            if root.get("scope") not in ("project", "user") or not root.get("path"):
+                continue
+            base = expand_surface(root["path"], project, home, dsh_home, agents_home, root["scope"])
+            for skill in owned_skills:
+                expected.add(base / skill / "SKILL.md")
+        mcp = harness.get("mcp", {})
+        if mcp.get("method") not in ("file-json", "file-toml"):
+            continue
+        targets = mcp.get("targets") or [{"scope": "project", "path": mcp.get("target")}]
+        for target in targets:
+            scope = target.get("scope", "project")
+            if scope not in ("project", "user") or not target.get("path"):
+                continue
+            path = expand_surface(target["path"], project, home, dsh_home, agents_home, scope)
+            if mcp.get("method") == "file-json" and (
+                path.suffix == ".jsonc" or (not path.exists() and path.with_suffix(".jsonc").exists())
+            ):
+                continue  # the installer refuses to edit a JSONC config
+            expected.add(path)
+    return sorted(expected, key=str)
 
 
 def make_fixture(root: Path) -> Path:
@@ -129,36 +221,32 @@ def main(argv: list[str] | None = None) -> int:
     project = make_fixture(work)
     checker = Checker()
 
+    dsh_home = home / "dsh-home"
+    agents_home = home / ".agents"
     common = ["--project", str(project), "--home", str(home),
-              "--dsh-home", str(home / "dsh-home"), "--agents-home", str(home / ".agents")]
+              "--dsh-home", str(dsh_home), "--agents-home", str(agents_home)]
+    spec = json.loads((REPO / "harnesses.json").read_text(encoding="utf-8"))
 
     # ── 1. install ──────────────────────────────────────────────────────────
     first = run_installer(*common, "--scope", "both", home=home)
     checker.check("install exits 0", first.returncode == 0, first.stdout.strip().splitlines()[-1] if first.stdout else "")
 
-    expected_files = [
-        project / "AGENTS.md",
-        project / "CLAUDE.md",
-        project / "GEMINI.md",
-        project / ".github" / "copilot-instructions.md",
-        project / ".cursor" / "rules" / "lean-formalization.mdc",
-        project / ".mcp.json",
-        project / ".vscode" / "mcp.json",
-        project / ".agents" / "skills" / "lean-formalization" / "SKILL.md",
-        project / ".agents" / "skills" / "lean-beam" / "SKILL.md",
-        project / "lean-formalization.json",
-        project / "LeanAudit.lean",
-        project / "LeanScan.lean",
-        project / "scripts" / "leancheck.ps1",
-        project / ".lean-formalization" / "manifest.json",
-        home / ".codex" / "config.toml",
-        home / ".gemini" / "settings.json",
-        home / ".cursor" / "mcp.json",
-        home / ".claude" / "CLAUDE.md",
-        home / ".config" / "opencode" / "AGENTS.md",
-    ]
+    # The fixture home is pinned, so harness detection here is the installer's
+    # own answer (commands on PATH plus marker paths under the fixture home).
+    # Surfaces are required only for the harnesses it actually configured.
+    chosen = selected_harnesses(first.stdout)
+    checker.check("installer reported the harnesses it configured", chosen is not None,
+                  "missing 'harnesses : ...' report line" if chosen is None else "")
+    chosen = chosen or []
+    for hid, harness in spec.get("harnesses", {}).items():
+        if harness.get("tier") == 1 and hid not in chosen:
+            checker.skip("harness %s surfaces" % hid,
+                         "not detected in the fixture; its files are not required")
+
+    expected_files = expected_install_files(spec, chosen, project, home, dsh_home, agents_home)
     missing = [str(p.relative_to(work)) for p in expected_files if not p.is_file()]
-    checker.check("every expected file exists", not missing, ", ".join(missing))
+    checker.check("every expected file exists for the detected harnesses", not missing,
+                  ", ".join(missing))
 
     agents = (project / "AGENTS.md").read_text(encoding="utf-8")
     checker.check("contract block present exactly once",
@@ -180,12 +268,14 @@ def main(argv: list[str] | None = None) -> int:
             json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             parse_failures.append("%s: %s" % (path.name, exc))
-    try:
-        toml = tomllib.loads((home / ".codex" / "config.toml").read_text(encoding="utf-8"))
-        if "lean-lsp" not in toml.get("mcp_servers", {}):
-            parse_failures.append("codex config.toml has no [mcp_servers.lean-lsp]")
-    except tomllib.TOMLDecodeError as exc:
-        parse_failures.append("codex config.toml: %s" % exc)
+    codex_config = home / ".codex" / "config.toml"
+    if codex_config.is_file():
+        try:
+            toml = tomllib.loads(codex_config.read_text(encoding="utf-8"))
+            if "lean-lsp" not in toml.get("mcp_servers", {}):
+                parse_failures.append("codex config.toml has no [mcp_servers.lean-lsp]")
+        except tomllib.TOMLDecodeError as exc:
+            parse_failures.append("codex config.toml: %s" % exc)
     checker.check("every config file still parses", not parse_failures, "; ".join(parse_failures))
 
     # OpenCode 1.x and 2.x take different (mutually rejected) MCP config shapes, so
@@ -363,9 +453,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.json:
         print(json.dumps({"work": str(work), "results": checker.results,
-                          "failed": checker.failed}, indent=2))
+                          "failed": checker.failed, "skipped": checker.skipped}, indent=2))
     print("")
-    print("smoke: %d checks, %d failed" % (len(checker.results), checker.failed))
+    print("smoke: %d checks, %d failed, %d skipped" % (
+        len(checker.results), checker.failed, checker.skipped))
     print("scratch tree left at %s" % work)
     return 1 if checker.failed else 0
 

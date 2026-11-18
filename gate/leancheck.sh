@@ -21,8 +21,12 @@
 # statement must never look verified. Lock deliberately with --lock after
 # reviewing that the targets are the statements you want.
 #
-# python3 is required for config parsing and the JSON checks; `python` is accepted
-# as a fallback (Git Bash on Windows ships no `python3`).
+# python3 is required for config parsing and the JSON checks. Every candidate is
+# actually executed — `command -v` alone is not trusted, because Windows Store
+# aliases under %LOCALAPPDATA%\Microsoft\WindowsApps are on PATH but are not a
+# working interpreter. `python` is the next candidate and `py -3` the Windows
+# fallback; a real python3 always wins. If none works the gate exits 2 and says
+# whether a WindowsApps placeholder was found or no interpreter exists at all.
 #
 # Usage:
 #   bash scripts/leancheck.sh
@@ -39,7 +43,7 @@ while [ $# -gt 0 ]; do
     --config) CONFIG="$2"; shift 2 ;;
     --no-build) NOBUILD=1; shift ;;
     --lock) DOLOCK=1; shift ;;
-    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,35p' "$0"; exit 0 ;;
     *) echo "leancheck: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -48,16 +52,77 @@ PROJECT_ROOT="$PWD"
 case "$CONFIG" in /*) CONFIG_PATH="$CONFIG" ;; *) CONFIG_PATH="$PROJECT_ROOT/$CONFIG" ;; esac
 if [ ! -f "$CONFIG_PATH" ]; then echo "leancheck: config not found: $CONFIG_PATH" >&2; exit 2; fi
 
-PYTHON=""
+# >>> python-discovery
+# Keep this block self-contained: verify/check_gate_shell.py sources it to test
+# PATH handling without running the whole gate.
+PYTHON=()
+PYTHON_PROBLEMS=()
+PYTHON_STUB_SEEN=0
+python_problem() { PYTHON_PROBLEMS+=("$1"); }
+is_windowsapps_path() {
+  # Case-insensitive on both Windows separators; no external commands needed.
+  local bs='\'
+  local normalized="${1//"$bs"/\/}"
+  case "$normalized" in
+    *[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]/[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Aa][Pp][Pp][Ss]*) return 0 ;;
+  esac
+  return 1
+}
+probe_python() {
+  local label="$1"
+  shift
+  local found
+  found="$(command -v "$1" 2>/dev/null || true)"
+  if [ -z "$found" ]; then
+    python_problem "$label: not found on PATH"
+    return 1
+  fi
+  if is_windowsapps_path "$found"; then
+    PYTHON_STUB_SEEN=1
+    python_problem "$label: resolves into Microsoft\\WindowsApps (Store placeholder): $found"
+    return 1
+  fi
+  local exe
+  # A Store alias can exit 0 with no output, so require a real Python 3 and a
+  # non-empty sys.executable from the candidate itself.
+  exe="$("$@" -c 'import sys; print(sys.executable) if sys.version_info.major == 3 else sys.exit(1)' 2>/dev/null)" || {
+    python_problem "$label: probe failed (cannot run Python 3)"
+    return 1
+  }
+  if [ -z "$exe" ]; then
+    python_problem "$label: probe produced no interpreter path"
+    return 1
+  fi
+  if is_windowsapps_path "$exe"; then
+    PYTHON_STUB_SEEN=1
+    python_problem "$label: resolves into Microsoft\\WindowsApps (Store placeholder): $exe"
+    return 1
+  fi
+  PYTHON=("$@")
+  return 0
+}
 for candidate in python3 python; do
-  if command -v "$candidate" >/dev/null 2>&1; then PYTHON="$candidate"; break; fi
+  probe_python "$candidate" "$candidate" && break
 done
-if [ -z "$PYTHON" ]; then
-  echo "leancheck: python3 (or python) is required to read $CONFIG and check JSON" >&2
+if [ "${#PYTHON[@]}" -eq 0 ] && command -v py >/dev/null 2>&1; then
+  probe_python "py -3" py -3 || true
+fi
+if [ "${#PYTHON[@]}" -eq 0 ]; then
+  echo "leancheck: no usable Python 3 interpreter found." >&2
+  for problem in "${PYTHON_PROBLEMS[@]}"; do
+    echo "leancheck:   - $problem" >&2
+  done
+  if [ "$PYTHON_STUB_SEEN" -eq 1 ]; then
+    echo "leancheck: a WindowsApps Python placeholder was detected; install a real Python 3 (or a real python3) and put it before WindowsApps on PATH." >&2
+  else
+    echo "leancheck: install Python 3 and put it first on PATH." >&2
+  fi
+  echo "leancheck: on Windows you can alternatively run: pwsh -File scripts/leancheck.ps1" >&2
   exit 2
 fi
+# <<< python-discovery
 
-eval "$("$PYTHON" - "$CONFIG_PATH" <<'PY'
+eval "$("${PYTHON[@]}" - "$CONFIG_PATH" <<'PY'
 import json, shlex, sys
 # Lean types carry unicode (∀, ⊢, …); a Windows console default (GBK) would crash
 # the checks while printing a failure.
@@ -107,7 +172,7 @@ if [ "${#SAFEDIRS[@]}" -gt 0 ]; then
 fi
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-SHORT="$("$PYTHON" -c 'import secrets;print(secrets.token_hex(3))')"
+SHORT="$("${PYTHON[@]}" -c 'import secrets;print(secrets.token_hex(3))')"
 RUN_DIR="$PROJECT_ROOT/${EVIDENCE_DIR%/}/runs/$STAMP-$SHORT"
 mkdir -p "$RUN_DIR"
 
@@ -147,7 +212,7 @@ else
   echo "    library-scan skipped: $SCAN_SCRIPT is missing from the project"
 fi
 
-"$PYTHON" - "$RUN_DIR" "$LIBRARY" "$STAMP" "$LOCK_FILE" "$MIN_DUP" "$SCAN_RAN" "$DOLOCK" \
+"${PYTHON[@]}" - "$RUN_DIR" "$LIBRARY" "$STAMP" "$LOCK_FILE" "$MIN_DUP" "$SCAN_RAN" "$DOLOCK" \
     "$PROJECT_ROOT" "$NOBUILD" \
     "${STEP_NAMES[@]:-}" -- "${STATUSES[@]:-}" -- "${STEP_SECONDS[@]:-}" -- \
     "${ALLOWED[@]}" -- "${TARGETS[@]}" <<'PY'

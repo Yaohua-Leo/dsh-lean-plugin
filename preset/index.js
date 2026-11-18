@@ -25,7 +25,11 @@ function apply(ctx) {
             'Fail-closed check of the Lean preset: exact required/forbidden MCP tools, ' +
             'and the current workspace gate state. Call at the start of Lean work and ' +
             'whenever a Lean tool is missing; never claim proof acceptance from a partial result.',
-        parameters: {},
+        // Raw ctx.tools.register() forwards `parameters` verbatim as the provider's
+        // function schema (it does not run parameterSchemaSpecToJsonSchema), so a
+        // no-argument tool still needs an object-rooted JSON Schema. An empty `{}`
+        // is not one: the Messages API rejects it before the first model step.
+        parameters: { type: 'object', properties: {} },
         output: {
             schema: {
                 type: 'object',

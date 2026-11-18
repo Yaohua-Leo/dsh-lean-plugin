@@ -26,6 +26,13 @@ try {
         },
       };
       apply(ctx);
+      // Raw ctx.tools.register() forwards `parameters` verbatim to the provider, so
+      // the no-argument tool must still declare an object-rooted JSON Schema.
+      assert.equal(registered.parameters?.type, 'object', `${mode}: lean_selfcheck parameters.type must be 'object'`);
+      assert.equal(typeof registered.parameters?.properties, 'object',
+        `${mode}: lean_selfcheck parameters.properties must be an object`);
+      assert(!Array.isArray(registered.parameters.properties),
+        `${mode}: lean_selfcheck parameters.properties must be an object, not an array`);
       const value = await registered.execute({}, {agent:{}});
       const schema = registered.output.schema;
       assert.deepEqual(Object.keys(value).sort(), Object.keys(schema.properties).sort());
